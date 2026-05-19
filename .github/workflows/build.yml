@@ -13,6 +13,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Show repo structure
+      - name: Show repository structure
+        run: |
+          echo "===== ROOTFS ====="
+          find rootfs | head -300
+
+      # Cleanup dangerous extracted firmware files
+      - name: Cleanup rootfs
+        run: |
+          rm -rf rootfs/dev || true
+          rm -rf rootfs/proc || true
+          rm -rf rootfs/sys || true
+          rm -rf rootfs/tmp || true
+          rm -rf rootfs/overlay || true
+          rm -rf rootfs/rom || true
+          rm -rf rootfs/usr/lib/opkg || true
+
       # Free disk space
       - name: Free disk space
         run: |
@@ -20,8 +37,8 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo apt clean
 
-      # Install build dependencies
-      - name: Install build dependencies
+      # Install dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
 
@@ -46,8 +63,8 @@ jobs:
             wget \
             curl
 
-      # Clone OpenWrt source
-      - name: Clone OpenWrt source
+      # Clone OpenWrt
+      - name: Clone OpenWrt
         run: |
           git clone https://github.com/openwrt/openwrt.git source
 
@@ -59,8 +76,8 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # Create target config
-      - name: Create config
+      # Configure target
+      - name: Configure target
         run: |
           cd source
 
@@ -72,26 +89,24 @@ jobs:
 
           make defconfig
 
-      # Create custom files folders
-      - name: Prepare custom files
+      # Prepare files directory
+      - name: Prepare files directory
         run: |
-          mkdir -p source/files/etc
-          mkdir -p source/files/www
-          mkdir -p source/files/root
+          mkdir -p source/files
 
-      # Copy config files
-      - name: Copy config files
+      # Copy ETC
+      - name: Copy etc
         run: |
-          if [ -d "rootfs/etc/config" ]; then
-            mkdir -p source/files/etc/config
+          if [ -d "rootfs/etc" ]; then
+            mkdir -p source/files/etc
 
             rsync -a \
-              rootfs/etc/config/ \
-              source/files/etc/config/
+              rootfs/etc/ \
+              source/files/etc/
           fi
 
-      # Copy web files
-      - name: Copy web files
+      # Copy WWW
+      - name: Copy www
         run: |
           if [ -d "rootfs/www" ]; then
             mkdir -p source/files/www
@@ -101,43 +116,32 @@ jobs:
               source/files/www/
           fi
 
-      # Copy init scripts
-      - name: Copy init scripts
+      # Copy ROOT
+      - name: Copy root home
         run: |
-          if [ -d "rootfs/etc/init.d" ]; then
-            mkdir -p source/files/etc/init.d
+          if [ -d "rootfs/root" ]; then
+            mkdir -p source/files/root
 
             rsync -a \
-              rootfs/etc/init.d/ \
-              source/files/etc/init.d/
+              rootfs/root/ \
+              source/files/root/
           fi
 
-      # Copy rc.local
-      - name: Copy rc.local
+      # Show files copied into firmware
+      - name: Show source/files
         run: |
-          if [ -f "rootfs/etc/rc.local" ]; then
-            mkdir -p source/files/etc
+          echo "===== SOURCE FILES ====="
 
-            cp \
-              rootfs/etc/rc.local \
-              source/files/etc/
-          fi
+          find source/files | head -300
 
-      # Show copied files
-      - name: Show copied files
-        run: |
-          echo "===== source/files ====="
-
-          find source/files | head -200
-
-      # Build firmware with full logs
+      # Build firmware
       - name: Build firmware
         run: |
           cd source
 
           make -j1 V=s 2>&1 | tee build.log
 
-      # Upload build log even if failed
+      # Upload build log
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -145,8 +149,8 @@ jobs:
           name: build-log
           path: source/build.log
 
-      # Show firmware files
-      - name: Show firmware files
+      # Show firmware output
+      - name: Show firmware output
         if: success()
         run: |
           find source/bin/targets/ -type f
