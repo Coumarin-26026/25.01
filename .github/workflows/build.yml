@@ -13,8 +13,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install tools
-      - name: Install tools
+      # Install packages
+      - name: Install packages
         run: |
           sudo apt update
 
@@ -22,23 +22,27 @@ jobs:
             wget \
             curl \
             tar \
-            gzip \
+            zstd \
             xz-utils \
             squashfs-tools \
             fakeroot \
             rsync
 
-      # Download ImageBuilder
+      # Download latest ImageBuilder
       - name: Download ImageBuilder
         run: |
-          wget https://downloads.openwrt.org/releases/24.10.0/targets/ipq806x/generic/openwrt-imagebuilder-24.10.0-ipq806x-generic.Linux-x86_64.tar.zst
+          wget https://downloads.openwrt.org/releases/25.12.4/targets/ipq806x/generic/openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64.tar.zst
 
           tar --use-compress-program=unzstd -xf \
-            openwrt-imagebuilder-24.10.0-ipq806x-generic.Linux-x86_64.tar.zst
+            openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64.tar.zst
 
-          mv openwrt-imagebuilder-* imagebuilder
+          IMAGEBUILDER_DIR=$(find . -maxdepth 1 -type d | grep openwrt-imagebuilder | head -1)
 
-      # Cleanup rootfs
+          echo "Found: $IMAGEBUILDER_DIR"
+
+          mv "$IMAGEBUILDER_DIR" imagebuilder
+
+      # Cleanup invalid extracted firmware dirs
       - name: Cleanup rootfs
         run: |
           rm -rf rootfs/dev || true
@@ -47,23 +51,43 @@ jobs:
           rm -rf rootfs/tmp || true
           rm -rf rootfs/rom || true
           rm -rf rootfs/overlay || true
+          rm -rf rootfs/usr/lib/opkg || true
 
-      # Copy custom files
-      - name: Copy files
+      # Prepare files
+      - name: Prepare custom files
         run: |
           mkdir -p imagebuilder/files
 
           if [ -d rootfs/etc ]; then
             mkdir -p imagebuilder/files/etc
 
-            rsync -a rootfs/etc/ imagebuilder/files/etc/
+            rsync -a \
+              rootfs/etc/ \
+              imagebuilder/files/etc/
           fi
 
           if [ -d rootfs/www ]; then
             mkdir -p imagebuilder/files/www
 
-            rsync -a rootfs/www/ imagebuilder/files/www/
+            rsync -a \
+              rootfs/www/ \
+              imagebuilder/files/www/
           fi
+
+          if [ -d rootfs/root ]; then
+            mkdir -p imagebuilder/files/root
+
+            rsync -a \
+              rootfs/root/ \
+              imagebuilder/files/root/
+          fi
+
+      # Show custom files
+      - name: Show custom files
+        run: |
+          echo "===== CUSTOM FILES ====="
+
+          find imagebuilder/files | head -300
 
       # Build firmware
       - name: Build firmware
@@ -75,8 +99,8 @@ jobs:
             PACKAGES="" \
             FILES="files"
 
-      # Show output
-      - name: Show output
+      # Show firmware
+      - name: Show firmware
         run: |
           find imagebuilder/bin/targets/ -type f
 
