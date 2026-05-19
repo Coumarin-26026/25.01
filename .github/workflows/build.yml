@@ -9,7 +9,7 @@ jobs:
 
     steps:
 
-      # Checkout repo
+      # Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -20,7 +20,7 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo apt clean
 
-      # Install dependencies
+      # Install build dependencies
       - name: Install build dependencies
         run: |
           sudo apt update
@@ -79,18 +79,26 @@ jobs:
           mkdir -p source/files/www
           mkdir -p source/files/root
 
-      # Copy safe config files
+      # Copy config files
       - name: Copy config files
         run: |
           if [ -d "rootfs/etc/config" ]; then
-            rsync -a rootfs/etc/config/ source/files/etc/config/
+            mkdir -p source/files/etc/config
+
+            rsync -a \
+              rootfs/etc/config/ \
+              source/files/etc/config/
           fi
 
-      # Copy web UI files
+      # Copy web files
       - name: Copy web files
         run: |
           if [ -d "rootfs/www" ]; then
-            rsync -a rootfs/www/ source/files/www/
+            mkdir -p source/files/www
+
+            rsync -a \
+              rootfs/www/ \
+              source/files/www/
           fi
 
       # Copy init scripts
@@ -104,14 +112,15 @@ jobs:
               source/files/etc/init.d/
           fi
 
-      # Copy rc.local if exists
+      # Copy rc.local
       - name: Copy rc.local
         run: |
           if [ -f "rootfs/etc/rc.local" ]; then
             mkdir -p source/files/etc
 
-            cp rootfs/etc/rc.local \
-            source/files/etc/
+            cp \
+              rootfs/etc/rc.local \
+              source/files/etc/
           fi
 
       # Show copied files
@@ -121,20 +130,30 @@ jobs:
 
           find source/files | head -200
 
-      # Build firmware with verbose logs
+      # Build firmware with full logs
       - name: Build firmware
         run: |
           cd source
 
-          make -j1 V=s
+          make -j1 V=s 2>&1 | tee build.log
 
-      # Show built firmware
+      # Upload build log even if failed
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: source/build.log
+
+      # Show firmware files
       - name: Show firmware files
+        if: success()
         run: |
           find source/bin/targets/ -type f
 
       # Upload firmware
       - name: Upload firmware
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-firmware
