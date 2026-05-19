@@ -1,112 +1,124 @@
-name: Fast Build Sysupgrade
+name: Build OpenWrt Firmware
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
 
-      # Checkout repo
+      #
+      # Checkout repository
+      #
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install packages
-      - name: Install packages
+      #
+      # Install dependencies
+      #
+      - name: Install dependencies
         run: |
           sudo apt update
 
           sudo apt install -y \
-            wget \
+            build-essential \
             curl \
-            tar \
-            zstd \
+            wget \
+            rsync \
+            unzip \
             xz-utils \
-            squashfs-tools \
-            fakeroot \
-            rsync
+            zstd \
+            file
 
-      # Download latest ImageBuilder
+      #
+      # Download OpenWrt ImageBuilder
+      #
       - name: Download ImageBuilder
         run: |
-          wget https://downloads.openwrt.org/releases/25.12.4/targets/ipq806x/generic/openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64.tar.zst
 
-          tar --use-compress-program=unzstd -xf \
+          wget \
+            https://downloads.openwrt.org/releases/25.12.4/targets/ipq806x/generic/openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64.tar.zst
+
+          tar --use-compress-program=unzstd -xvf \
             openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64.tar.zst
 
-          IMAGEBUILDER_DIR=$(find . -maxdepth 1 -type d | grep openwrt-imagebuilder | head -1)
+          mv openwrt-imagebuilder-25.12.4-ipq806x-generic.Linux-x86_64 imagebuilder
 
-          echo "Found: $IMAGEBUILDER_DIR"
-
-          mv "$IMAGEBUILDER_DIR" imagebuilder
-
-      # Cleanup invalid extracted firmware dirs
-      - name: Cleanup rootfs
-        run: |
-          rm -rf rootfs/dev || true
-          rm -rf rootfs/proc || true
-          rm -rf rootfs/sys || true
-          rm -rf rootfs/tmp || true
-          rm -rf rootfs/rom || true
-          rm -rf rootfs/overlay || true
-          rm -rf rootfs/usr/lib/opkg || true
-
-      # Prepare files
+      #
+      # Prepare custom rootfs
+      #
       - name: Prepare custom files
         run: |
+
           mkdir -p imagebuilder/files
 
-          if [ -d rootfs/etc ]; then
-            mkdir -p imagebuilder/files/etc
+          #
+          # Copy rootfs
+          #
+          rsync -a \
+            --exclude dev \
+            --exclude proc \
+            --exclude sys \
+            --exclude tmp \
+            --exclude overlay \
+            --exclude rom \
+            rootfs/ \
+            imagebuilder/files/
 
-            rsync -a \
-              rootfs/etc/ \
-              imagebuilder/files/etc/
-          fi
+          #
+          # Remove dangerous files
+          #
+          rm -rf imagebuilder/files/usr/lib/opkg || true
 
-          if [ -d rootfs/www ]; then
-            mkdir -p imagebuilder/files/www
+          #
+          # Remove kernel modules if exist
+          #
+          find imagebuilder/files -name "*.ko" -delete || true
 
-            rsync -a \
-              rootfs/www/ \
-              imagebuilder/files/www/
-          fi
+          #
+          # Remove temp/cache files
+          #
+          find imagebuilder/files -name "*.tmp" -delete || true
+          find imagebuilder/files -name "*.cache" -delete || true
 
-          if [ -d rootfs/root ]; then
-            mkdir -p imagebuilder/files/root
-
-            rsync -a \
-              rootfs/root/ \
-              imagebuilder/files/root/
-          fi
-
-      # Show custom files
-      - name: Show custom files
-        run: |
-          echo "===== CUSTOM FILES ====="
+          #
+          # Show copied files
+          #
+          echo "===== ROOTFS FILES ====="
 
           find imagebuilder/files | head -300
 
+      #
       # Build firmware
+      #
       - name: Build firmware
         run: |
+
           cd imagebuilder
 
-          make image \
-            PROFILE="ruijie_rg-mtfi-m520" \
-            PACKAGES="" \
+          make image PROFILE="ruijie_rg-mtfi-m520" \
+            PACKAGES="luci" \
             FILES="files"
 
-      # Show firmware
-      - name: Show firmware
+      #
+      # Show firmware files
+      #
+      - name: Show output
         run: |
+
+          echo "===== OUTPUT ====="
+
           find imagebuilder/bin/targets/ -type f
 
+      #
       # Upload firmware
+      #
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: sysupgrade
-          path: imagebuilder/bin/targets/ipq806x/generic/*sysupgrade.bin
+          name: openwrt-firmware
+          path: |
+            imagebuilder/bin/targets/ipq806x/generic/*sysupgrade.bin
+            imagebuilder/bin/targets/ipq806x/generic/*factory.bin
