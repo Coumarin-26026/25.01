@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install required tools
+      # Install tools
       - name: Install tools
         run: |
           sudo apt update
@@ -30,13 +30,13 @@ jobs:
             rsync \
             file
 
-      # Download firmware from Google Drive
+      # Download firmware
       - name: Download firmware
         run: |
           wget -O firmware.bin \
           "https://drive.usercontent.google.com/uc?id=1mxqnnH5r3YLlU4on0YMZVTZSrre72C3o&export=download"
 
-      # Show downloaded file
+      # Show firmware
       - name: Show firmware
         run: |
           ls -lah
@@ -53,6 +53,13 @@ jobs:
           sudo chmod -R 755 .
           sudo chown -R $USER:$USER .
 
+      # Find squashfs-root
+      - name: Find squashfs-root
+        run: |
+          echo "===== SEARCH squashfs-root ====="
+
+          find . -type d -name "squashfs-root"
+
       # Remove old rootfs
       - name: Remove old rootfs
         run: |
@@ -63,28 +70,34 @@ jobs:
         run: |
           mkdir -p rootfs
 
+          ROOTFS_DIR=$(find . -type d -name "squashfs-root" | head -n 1)
+
+          echo "FOUND ROOTFS:"
+          echo "$ROOTFS_DIR"
+
           rsync -a \
             --exclude dev \
             --exclude proc \
             --exclude sys \
             --exclude tmp \
-            _firmware.bin.extracted/squashfs-root/ \
+            "$ROOTFS_DIR"/ \
             rootfs/
 
-      # Show rootfs content
-      - name: Show rootfs content
+      # Show rootfs
+      - name: Show rootfs
         run: |
           echo "===== ROOTFS ====="
+
           find rootfs | head -200
 
-      # Commit extracted rootfs back to GitHub
-      - name: Commit extracted rootfs
+      # Commit rootfs to GitHub
+      - name: Commit rootfs
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
           git add rootfs
 
-          git commit -m "Auto extract rootfs from firmware" || echo "No changes"
+          git commit -m "Auto extract firmware rootfs" || echo "No changes"
 
           git push
