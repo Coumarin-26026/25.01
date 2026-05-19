@@ -46,7 +46,7 @@ jobs:
             wget \
             curl
 
-      # Clone OpenWrt
+      # Clone OpenWrt source
       - name: Clone OpenWrt source
         run: |
           git clone https://github.com/openwrt/openwrt.git source
@@ -59,7 +59,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # Create config
+      # Create target config
       - name: Create config
         run: |
           cd source
@@ -72,25 +72,66 @@ jobs:
 
           make defconfig
 
-      # Copy custom rootfs
-      - name: Copy custom rootfs
+      # Create custom files folders
+      - name: Prepare custom files
         run: |
-          mkdir -p source/files
+          mkdir -p source/files/etc
+          mkdir -p source/files/www
+          mkdir -p source/files/root
 
-          rsync -a \
-            --exclude dev \
-            --exclude proc \
-            --exclude sys \
-            --exclude tmp \
-            rootfs/ \
-            source/files/
+      # Copy safe config files
+      - name: Copy config files
+        run: |
+          if [ -d "rootfs/etc/config" ]; then
+            rsync -a rootfs/etc/config/ source/files/etc/config/
+          fi
 
-      # Build firmware
+      # Copy web UI files
+      - name: Copy web files
+        run: |
+          if [ -d "rootfs/www" ]; then
+            rsync -a rootfs/www/ source/files/www/
+          fi
+
+      # Copy init scripts
+      - name: Copy init scripts
+        run: |
+          if [ -d "rootfs/etc/init.d" ]; then
+            mkdir -p source/files/etc/init.d
+
+            rsync -a \
+              rootfs/etc/init.d/ \
+              source/files/etc/init.d/
+          fi
+
+      # Copy rc.local if exists
+      - name: Copy rc.local
+        run: |
+          if [ -f "rootfs/etc/rc.local" ]; then
+            mkdir -p source/files/etc
+
+            cp rootfs/etc/rc.local \
+            source/files/etc/
+          fi
+
+      # Show copied files
+      - name: Show copied files
+        run: |
+          echo "===== source/files ====="
+
+          find source/files | head -200
+
+      # Build firmware with verbose logs
       - name: Build firmware
         run: |
           cd source
 
-          make -j$(nproc)
+          make -j1 V=s
+
+      # Show built firmware
+      - name: Show firmware files
+        run: |
+          find source/bin/targets/ -type f
 
       # Upload firmware
       - name: Upload firmware
