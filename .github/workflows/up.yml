@@ -10,13 +10,13 @@ jobs:
     steps:
 
       #
-      # Checkout your repo
+      # Checkout repository
       #
       - name: Checkout
         uses: actions/checkout@v4
 
       #
-      # Install required tools
+      # Install required packages
       #
       - name: Install packages
         run: |
@@ -61,48 +61,85 @@ jobs:
           unsquashfs -d squashfs-root firmware/rootfs.bin
 
           echo "===== ORIGINAL ROOTFS ====="
+
           find squashfs-root | head -200
 
       #
-      # Inject SAFE custom files only
+      # Inject SAFE custom overlay
       #
-      - name: Inject custom overlay
+      - name: Inject custom files
         run: |
 
           #
           # SAFE ETC
           #
-          rsync -a rootfs/etc/config/ squashfs-root/etc/config/ || true
-          rsync -a rootfs/etc/init.d/ squashfs-root/etc/init.d/ || true
-          rsync -a rootfs/etc/uci-defaults/ squashfs-root/etc/uci-defaults/ || true
-          rsync -a rootfs/etc/nginx/ squashfs-root/etc/nginx/ || true
-          rsync -a rootfs/etc/profile.d/ squashfs-root/etc/profile.d/ || true
-          rsync -a rootfs/etc/sysctl.d/ squashfs-root/etc/sysctl.d/ || true
-          rsync -a rootfs/etc/nftables.d/ squashfs-root/etc/nftables.d/ || true
-          rsync -a rootfs/etc/rc.button/ squashfs-root/etc/rc.button/ || true
+          if [ -d rootfs/etc/config ]; then
+            rsync -a rootfs/etc/config/ squashfs-root/etc/config/
+          fi
+
+          if [ -d rootfs/etc/init.d ]; then
+            rsync -a rootfs/etc/init.d/ squashfs-root/etc/init.d/
+          fi
+
+          if [ -d rootfs/etc/uci-defaults ]; then
+            rsync -a rootfs/etc/uci-defaults/ squashfs-root/etc/uci-defaults/
+          fi
+
+          if [ -d rootfs/etc/nginx ]; then
+            rsync -a rootfs/etc/nginx/ squashfs-root/etc/nginx/
+          fi
+
+          if [ -d rootfs/etc/profile.d ]; then
+            rsync -a rootfs/etc/profile.d/ squashfs-root/etc/profile.d/
+          fi
+
+          if [ -d rootfs/etc/sysctl.d ]; then
+            rsync -a rootfs/etc/sysctl.d/ squashfs-root/etc/sysctl.d/
+          fi
+
+          if [ -d rootfs/etc/nftables.d ]; then
+            rsync -a rootfs/etc/nftables.d/ squashfs-root/etc/nftables.d/
+          fi
+
+          if [ -d rootfs/etc/rc.button ]; then
+            rsync -a rootfs/etc/rc.button/ squashfs-root/etc/rc.button/
+          fi
 
           #
           # SAFE USR
           #
-          rsync -a rootfs/usr/bin/ squashfs-root/usr/bin/ || true
-          rsync -a rootfs/usr/sbin/ squashfs-root/usr/sbin/ || true
-          rsync -a rootfs/usr/lib/lua/ squashfs-root/usr/lib/lua/ || true
-          rsync -a rootfs/usr/share/ squashfs-root/usr/share/ || true
+          if [ -d rootfs/usr/bin ]; then
+            rsync -a rootfs/usr/bin/ squashfs-root/usr/bin/
+          fi
+
+          if [ -d rootfs/usr/sbin ]; then
+            rsync -a rootfs/usr/sbin/ squashfs-root/usr/sbin/
+          fi
+
+          if [ -d rootfs/usr/lib/lua ]; then
+            rsync -a rootfs/usr/lib/lua/ squashfs-root/usr/lib/lua/
+          fi
+
+          if [ -d rootfs/usr/share ]; then
+            rsync -a rootfs/usr/share/ squashfs-root/usr/share/
+          fi
 
           #
           # SAFE WWW
           #
-          rsync -a rootfs/www/ squashfs-root/www/ || true
+          if [ -d rootfs/www ]; then
+            rsync -a rootfs/www/ squashfs-root/www/
+          fi
 
           echo "===== MERGED ROOTFS ====="
+
           find squashfs-root | head -300
 
       #
-      # Rebuild squashfs
+      # Rebuild squashfs root
       #
       - name: Build new root
         run: |
-
           mksquashfs \
             squashfs-root \
             firmware/root \
@@ -117,11 +154,10 @@ jobs:
       #
       - name: Create CONTROL
         run: |
+          echo "BOARD=ruijie,rg-mtfi-m520" > firmware/CONTROL
+          echo "VERSION=26.04-custom" >> firmware/CONTROL
 
-          cat > firmware/CONTROL << 'EOF'
-BOARD=ruijie,rg-mtfi-m520
-VERSION=26.04-custom
-EOF
+          echo "===== CONTROL ====="
 
           cat firmware/CONTROL
 
@@ -130,7 +166,6 @@ EOF
       #
       - name: Build sysupgrade
         run: |
-
           cd firmware
 
           tar -cvf \
@@ -144,15 +179,16 @@ EOF
       #
       - name: Verify firmware
         run: |
-
           echo "===== OUTPUT ====="
 
           ls -lah output
 
           echo
+
           file output/*
 
           echo
+
           sha256sum output/*
 
       #
