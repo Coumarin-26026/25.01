@@ -1,4 +1,4 @@
-name: Build M520 Firmware
+name: Build M520 Sysupgrade
 
 on:
   workflow_dispatch:
@@ -24,118 +24,73 @@ jobs:
 
           sudo apt install -y \
             wget \
-            curl \
             rsync \
-            xz-utils \
-            zstd \
             squashfs-tools \
-            fakeroot \
-            file \
-            unzip \
+            xz-utils \
             tar
 
       #
-      # Download official firmware
+      # Download latest kernel
       #
-      - name: Download firmware
+      - name: Download kernel
         run: |
 
           mkdir -p firmware
 
-          cd firmware
-
-          #
-          # Kernel
-          #
-          wget -O kernel.bin \
+          wget -O firmware/kernel.bin \
             https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p2-kernel.bin
 
-          #
-          # Original rootfs
-          #
-          wget -O rootfs-original.bin \
-            https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p3-rootfs.bin
-
       #
-      # Extract original rootfs
+      # Prepare rootfs
       #
-      - name: Extract original rootfs
+      - name: Prepare rootfs
         run: |
 
-          mkdir -p extracted/rootfs
+          mkdir -p build-rootfs
 
-          #
-          # Extract squashfs
-          #
-          unsquashfs \
-            -f \
-            -d extracted/rootfs \
-            firmware/rootfs-original.bin || true
-
-          #
-          # Recreate important dirs
-          #
-          mkdir -p extracted/rootfs/dev
-          mkdir -p extracted/rootfs/proc
-          mkdir -p extracted/rootfs/sys
-          mkdir -p extracted/rootfs/tmp
-
-          #
-          # Fake console device
-          #
-          touch extracted/rootfs/dev/console
-
-          echo "===== EXTRACTED ROOTFS ====="
-
-          ls -lah extracted/rootfs
-
-      #
-      # Overlay custom rootfs
-      #
-      - name: Overlay custom files
-        run: |
-
-          #
-          # Copy your custom files
-          #
           rsync -a \
+            --exclude dev \
+            --exclude proc \
+            --exclude sys \
+            --exclude tmp \
+            --exclude overlay \
+            --exclude rom \
             rootfs/ \
-            extracted/rootfs/
+            build-rootfs/
+
+          #
+          # Required dirs
+          #
+          mkdir -p build-rootfs/dev
+          mkdir -p build-rootfs/proc
+          mkdir -p build-rootfs/sys
+          mkdir -p build-rootfs/tmp
+
+          #
+          # Fake console
+          #
+          touch build-rootfs/dev/console
 
           #
           # Remove dangerous kernel modules
           #
-          find extracted/rootfs -name "*.ko" -delete || true
-
-          #
-          # Remove opkg cache
-          #
-          rm -rf extracted/rootfs/usr/lib/opkg || true
-
-          #
-          # Remove temporary files
-          #
-          rm -rf extracted/rootfs/tmp/* || true
-
-          echo "===== FINAL ROOTFS ====="
-
-          find extracted/rootfs | head -300
+          find build-rootfs -name "*.ko" -delete || true
 
       #
-      # Build new squashfs rootfs
+      # Build rootfs.bin
       #
-      - name: Build new rootfs
+      - name: Build rootfs
         run: |
 
           mksquashfs \
-            extracted/rootfs \
+            build-rootfs \
             firmware/rootfs.bin \
             -noappend \
             -comp xz \
             -b 262144
 
       #
-      # Create sysupgrade structure
+      # Create sysupgrade.bin
       #
       - name: Create sysupgrade
         run: |
@@ -143,7 +98,7 @@ jobs:
           mkdir -p output/sysupgrade
 
           #
-          # Copy files
+          # Required filenames
           #
           cp firmware/kernel.bin \
             output/sysupgrade/kernel
@@ -152,7 +107,7 @@ jobs:
             output/sysupgrade/root
 
           #
-          # Create CONTROL file
+          # CONTROL
           #
           cat > output/sysupgrade/CONTROL << 'EOF'
           BOARD=ruijie,rg-mtfi-m520
@@ -160,7 +115,7 @@ jobs:
           EOF
 
           #
-          # Build sysupgrade.bin
+          # Create final sysupgrade.bin
           #
           cd output/sysupgrade
 
@@ -170,24 +125,11 @@ jobs:
             kernel \
             root
 
-          cd ..
-
-          #
-          # Copy standalone files
-          #
-          cp ../firmware/kernel.bin \
-            openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-kernel.bin
-
-          cp ../firmware/rootfs.bin \
-            openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-rootfs.bin
-
       #
-      # Show output
+      # Verify firmware
       #
-      - name: Show output
+      - name: Verify firmware
         run: |
-
-          echo "===== OUTPUT ====="
 
           ls -lah output
 
@@ -200,11 +142,11 @@ jobs:
           sha256sum output/*.bin
 
       #
-      # Upload firmware
+      # Upload sysupgrade.bin
       #
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: m520-firmware
+          name: m520-sysupgrade
           path: |
-            output/*.bin
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin
