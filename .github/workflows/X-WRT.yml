@@ -1,4 +1,4 @@
-name: Build X-WRT-like M520
+name: Build RG-MTFi-M520 Sysupgrade
 
 on:
   workflow_dispatch:
@@ -10,105 +10,157 @@ jobs:
     steps:
 
       #
-      # Checkout
+      # Checkout your repo
       #
       - name: Checkout
         uses: actions/checkout@v4
 
       #
-      # Install tools
+      # Install required tools
       #
-      - name: Install tools
+      - name: Install packages
         run: |
           sudo apt update
 
           sudo apt install -y \
             wget \
-            tar \
-            zstd \
             rsync \
-            file
+            tar \
+            file \
+            squashfs-tools
 
       #
-      # Download ImageBuilder
+      # Create working directories
       #
-      - name: Download ImageBuilder
+      - name: Prepare directories
         run: |
-
-          wget -O ib.tar.zst \
-            https://downloads.openwrt.org/snapshots/targets/ipq806x/generic/openwrt-imagebuilder-ipq806x-generic.Linux-x86_64.tar.zst
-
-          mkdir imagebuilder
-
-          tar --zstd -xf ib.tar.zst -C imagebuilder --strip-components=1
-
-      #
-      # Show profiles
-      #
-      - name: Show profiles
-        run: |
-          cd imagebuilder
-          make info
-
-      #
-      # Inject custom rootfs
-      #
-      - name: Inject custom rootfs
-        run: |
-
-          mkdir -p imagebuilder/files
-
-          rsync -a \
-            rootfs/ \
-            imagebuilder/files/
-
-          echo "===== CUSTOM ROOTFS ====="
-
-          find imagebuilder/files | head -300
-
-      #
-      # Build firmware
-      #
-      - name: Build firmware
-        run: |
-
-          cd imagebuilder
-
-          make image \
-            PROFILE="ruijie_rg-mtfi-m520" \
-            FILES="files"
-
-      #
-      # Collect firmware
-      #
-      - name: Collect firmware
-        run: |
-
+          mkdir -p firmware
           mkdir -p output
 
-          cp imagebuilder/bin/targets/ipq806x/generic/*sysupgrade.bin output/ || true
+      #
+      # Download official X-WRT kernel
+      #
+      - name: Download X-WRT kernel
+        run: |
+          wget -O firmware/kernel \
+            https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p2-kernel.bin
 
-          cp imagebuilder/bin/targets/ipq806x/generic/*factory.bin output/ || true
+      #
+      # Download official X-WRT rootfs
+      #
+      - name: Download X-WRT rootfs
+        run: |
+          wget -O firmware/rootfs.bin \
+            https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p3-rootfs.bin
+
+      #
+      # Extract original rootfs
+      #
+      - name: Extract rootfs
+        run: |
+          unsquashfs -d squashfs-root firmware/rootfs.bin
+
+          echo "===== ORIGINAL ROOTFS ====="
+          find squashfs-root | head -200
+
+      #
+      # Inject SAFE custom files only
+      #
+      - name: Inject custom overlay
+        run: |
+
+          #
+          # SAFE ETC
+          #
+          rsync -a rootfs/etc/config/ squashfs-root/etc/config/ || true
+          rsync -a rootfs/etc/init.d/ squashfs-root/etc/init.d/ || true
+          rsync -a rootfs/etc/uci-defaults/ squashfs-root/etc/uci-defaults/ || true
+          rsync -a rootfs/etc/nginx/ squashfs-root/etc/nginx/ || true
+          rsync -a rootfs/etc/profile.d/ squashfs-root/etc/profile.d/ || true
+          rsync -a rootfs/etc/sysctl.d/ squashfs-root/etc/sysctl.d/ || true
+          rsync -a rootfs/etc/nftables.d/ squashfs-root/etc/nftables.d/ || true
+          rsync -a rootfs/etc/rc.button/ squashfs-root/etc/rc.button/ || true
+
+          #
+          # SAFE USR
+          #
+          rsync -a rootfs/usr/bin/ squashfs-root/usr/bin/ || true
+          rsync -a rootfs/usr/sbin/ squashfs-root/usr/sbin/ || true
+          rsync -a rootfs/usr/lib/lua/ squashfs-root/usr/lib/lua/ || true
+          rsync -a rootfs/usr/share/ squashfs-root/usr/share/ || true
+
+          #
+          # SAFE WWW
+          #
+          rsync -a rootfs/www/ squashfs-root/www/ || true
+
+          echo "===== MERGED ROOTFS ====="
+          find squashfs-root | head -300
+
+      #
+      # Rebuild squashfs
+      #
+      - name: Build new root
+        run: |
+
+          mksquashfs \
+            squashfs-root \
+            firmware/root \
+            -noappend \
+            -comp xz \
+            -b 262144 \
+            -no-xattrs \
+            -all-root
+
+      #
+      # Create CONTROL
+      #
+      - name: Create CONTROL
+        run: |
+
+          cat > firmware/CONTROL << 'EOF'
+BOARD=ruijie,rg-mtfi-m520
+VERSION=26.04-custom
+EOF
+
+          cat firmware/CONTROL
+
+      #
+      # Build sysupgrade.bin
+      #
+      - name: Build sysupgrade
+        run: |
+
+          cd firmware
+
+          tar -cvf \
+            ../output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin \
+            CONTROL \
+            kernel \
+            root
+
+      #
+      # Verify firmware
+      #
+      - name: Verify firmware
+        run: |
+
+          echo "===== OUTPUT ====="
 
           ls -lah output
 
-      #
-      # Verify
-      #
-      - name: Verify
-        run: |
-
+          echo
           file output/*
 
           echo
-
           sha256sum output/*
 
       #
-      # Upload
+      # Upload artifact
       #
-      - name: Upload
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: xwrt-m520-custom-rootfs
-          path: output/*
+          name: rg-mtfi-m520-sysupgrade
+          path: |
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
