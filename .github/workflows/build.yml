@@ -10,7 +10,7 @@ jobs:
     steps:
 
       #
-      # Checkout
+      # Checkout repository
       #
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,15 +32,15 @@ jobs:
             fakeroot \
             file \
             unzip \
-            jq
+            tar
 
       #
       # Download official firmware
       #
-      - name: Download official firmware
+      - name: Download firmware
         run: |
 
-          mkdir firmware
+          mkdir -p firmware
 
           cd firmware
 
@@ -62,48 +62,69 @@ jobs:
       - name: Extract original rootfs
         run: |
 
-          mkdir extracted
+          mkdir -p extracted/rootfs
 
+          #
+          # Extract squashfs
+          #
           unsquashfs \
+            -f \
             -d extracted/rootfs \
-            firmware/rootfs-original.bin
+            firmware/rootfs-original.bin || true
+
+          #
+          # Recreate important dirs
+          #
+          mkdir -p extracted/rootfs/dev
+          mkdir -p extracted/rootfs/proc
+          mkdir -p extracted/rootfs/sys
+          mkdir -p extracted/rootfs/tmp
+
+          #
+          # Fake console device
+          #
+          touch extracted/rootfs/dev/console
+
+          echo "===== EXTRACTED ROOTFS ====="
+
+          ls -lah extracted/rootfs
 
       #
-      # Overlay custom files
+      # Overlay custom rootfs
       #
       - name: Overlay custom files
         run: |
 
-          echo "===== BEFORE OVERLAY ====="
-
-          ls extracted/rootfs
-
           #
-          # Copy ONLY custom files
+          # Copy your custom files
           #
           rsync -a \
             rootfs/ \
             extracted/rootfs/
 
-          echo
-          echo "===== AFTER OVERLAY ====="
-
-          ls extracted/rootfs
-
-      #
-      # Remove dangerous kernel modules
-      #
-      - name: Cleanup rootfs
-        run: |
-
+          #
+          # Remove dangerous kernel modules
+          #
           find extracted/rootfs -name "*.ko" -delete || true
 
+          #
+          # Remove opkg cache
+          #
           rm -rf extracted/rootfs/usr/lib/opkg || true
 
+          #
+          # Remove temporary files
+          #
+          rm -rf extracted/rootfs/tmp/* || true
+
+          echo "===== FINAL ROOTFS ====="
+
+          find extracted/rootfs | head -300
+
       #
-      # Build new squashfs
+      # Build new squashfs rootfs
       #
-      - name: Build custom rootfs
+      - name: Build new rootfs
         run: |
 
           mksquashfs \
@@ -111,11 +132,10 @@ jobs:
             firmware/rootfs.bin \
             -noappend \
             -comp xz \
-            -b 262144 \
-            -root-owned
+            -b 262144
 
       #
-      # Create sysupgrade
+      # Create sysupgrade structure
       #
       - name: Create sysupgrade
         run: |
@@ -123,66 +143,48 @@ jobs:
           mkdir -p output/sysupgrade
 
           #
-          # Firmware parts
+          # Copy files
           #
-          cp firmware/kernel.bin output/sysupgrade/kernel
-          cp firmware/rootfs.bin output/sysupgrade/root
+          cp firmware/kernel.bin \
+            output/sysupgrade/kernel
+
+          cp firmware/rootfs.bin \
+            output/sysupgrade/root
 
           #
-          # CONTROL
+          # Create CONTROL file
           #
-          cat > output/sysupgrade/CONTROL <<EOF
+          cat > output/sysupgrade/CONTROL << 'EOF'
           BOARD=ruijie,rg-mtfi-m520
-          VERSION=26.04-custom
+          VERSION=Custom
           EOF
 
           #
-          # metadata
-          #
-          cat > output/sysupgrade/metadata.json <<EOF
-          {
-            "metadata_version": "1.1",
-            "supported_devices": [
-              "ruijie,rg-mtfi-m520"
-            ],
-            "version": {
-              "dist": "X-WRT",
-              "version": "26.04-custom"
-            }
-          }
-          EOF
-
-          #
-          # Create sysupgrade
+          # Build sysupgrade.bin
           #
           cd output/sysupgrade
 
-          tar --sort=name \
-              --owner=0 \
-              --group=0 \
-              --numeric-owner \
-              -cvf ../openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin \
-              CONTROL \
-              kernel \
-              root \
-              metadata.json
+          tar -cvf \
+            ../openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin \
+            CONTROL \
+            kernel \
+            root
+
+          cd ..
+
+          #
+          # Copy standalone files
+          #
+          cp ../firmware/kernel.bin \
+            openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-kernel.bin
+
+          cp ../firmware/rootfs.bin \
+            openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-rootfs.bin
 
       #
-      # Export files
+      # Show output
       #
-      - name: Export firmware
-        run: |
-
-          cp firmware/kernel.bin \
-            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-kernel.bin
-
-          cp firmware/rootfs.bin \
-            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-rootfs.bin
-
-      #
-      # Verify firmware
-      #
-      - name: Verify firmware
+      - name: Show output
         run: |
 
           echo "===== OUTPUT ====="
@@ -190,14 +192,12 @@ jobs:
           ls -lah output
 
           echo
-          echo "===== FILE TYPES ====="
 
-          find output -maxdepth 1 -type f -exec file {} \;
+          file output/*.bin
 
           echo
-          echo "===== SHA256 ====="
 
-          find output -maxdepth 1 -type f -exec sha256sum {} \;
+          sha256sum output/*.bin
 
       #
       # Upload firmware
@@ -206,4 +206,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: m520-firmware
-          path: output/*
+          path: |
+            output/*.bin
