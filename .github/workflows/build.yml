@@ -10,13 +10,13 @@ jobs:
     steps:
 
       #
-      # Checkout repository
+      # Checkout
       #
       - name: Checkout
         uses: actions/checkout@v4
 
       #
-      # Install packages
+      # Install tools
       #
       - name: Install packages
         run: |
@@ -31,41 +31,33 @@ jobs:
             squashfs-tools \
             fakeroot \
             file \
-            unzip
+            unzip \
+            jq
 
       #
-      # Download official X-WRT firmware
+      # Download official firmware
       #
-      - name: Download firmware files
+      - name: Download official files
         run: |
 
           mkdir firmware
 
           cd firmware
 
-          #
-          # Kernel
-          #
           wget -O kernel.bin \
             https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p2-kernel.bin
 
-          #
-          # Original rootfs
-          #
-          wget -O rootfs-original.bin \
+          wget -O original-rootfs.bin \
             https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p3-rootfs.bin
 
       #
-      # Build new squashfs rootfs
+      # Build custom squashfs
       #
-      - name: Build custom rootfs
+      - name: Build rootfs
         run: |
 
-          mkdir build-rootfs
+          mkdir -p build-rootfs
 
-          #
-          # Copy custom rootfs
-          #
           rsync -a \
             --exclude dev \
             --exclude proc \
@@ -77,65 +69,121 @@ jobs:
             build-rootfs/
 
           #
-          # Remove dangerous files
+          # Remove kernel modules
           #
           find build-rootfs -name "*.ko" -delete || true
 
+          #
+          # Remove opkg cache
+          #
           rm -rf build-rootfs/usr/lib/opkg || true
 
           #
-          # Show rootfs
+          # Show structure
           #
           echo "===== ROOTFS ====="
 
           find build-rootfs | head -300
 
           #
-          # Create squashfs
+          # Build squashfs
           #
           mksquashfs \
             build-rootfs \
             firmware/rootfs.bin \
             -noappend \
             -comp xz \
-            -b 262144
+            -b 262144 \
+            -root-owned
 
       #
-      # Create sysupgrade archive
+      # Create OpenWrt style sysupgrade
       #
       - name: Create sysupgrade
         run: |
 
-          mkdir output
-
-          cp firmware/kernel.bin output/
-          cp firmware/rootfs.bin output/
-
-          cd output
+          mkdir -p output/sysupgrade
 
           #
-          # Create sysupgrade.tar
+          # Copy firmware parts
           #
-          tar -cvf \
-            sysupgrade.tar \
-            kernel.bin \
-            rootfs.bin
+          cp firmware/kernel.bin output/sysupgrade/kernel
+          cp firmware/rootfs.bin output/sysupgrade/root
 
           #
-          # Rename
+          # Create CONTROL
           #
-          mv sysupgrade.tar \
-            openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin
+          cat > output/sysupgrade/CONTROL <<EOF
+          BOARD=ruijie,rg-mtfi-m520
+          VERSION=26.04-custom
+          EOF
+
+          #
+          # Create metadata
+          #
+          cat > output/sysupgrade/metadata.json <<EOF
+          {
+            "metadata_version": "1.1",
+            "supported_devices": [
+              "ruijie,rg-mtfi-m520"
+            ],
+            "version": {
+              "dist": "X-WRT",
+              "version": "26.04-custom"
+            }
+          }
+          EOF
+
+          #
+          # Create sysupgrade.bin
+          #
+          cd output/sysupgrade
+
+          tar --sort=name \
+              --owner=0 \
+              --group=0 \
+              --numeric-owner \
+              -cvf ../openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin \
+              CONTROL \
+              kernel \
+              root \
+              metadata.json
 
       #
-      # Show output
+      # Create flashable rootfs image
       #
-      - name: Show output files
+      - name: Create rootfs image
+        run: |
+
+          cp firmware/rootfs.bin \
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-rootfs.bin
+
+      #
+      # Create kernel image
+      #
+      - name: Create kernel image
+        run: |
+
+          cp firmware/kernel.bin \
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-kernel.bin
+
+      #
+      # Verify files
+      #
+      - name: Verify firmware
         run: |
 
           echo "===== OUTPUT ====="
 
           ls -lah output
+
+          echo
+
+          file output/*
+
+          echo
+
+          sha256sum output/*
 
       #
       # Upload firmware
