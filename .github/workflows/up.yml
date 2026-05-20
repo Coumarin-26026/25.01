@@ -65,7 +65,7 @@ jobs:
           unsquashfs -f -d squashfs-root firmware/rootfs.bin || true
 
           #
-          # Fake console device for CI
+          # Fake console device
           #
           mkdir -p squashfs-root/dev
 
@@ -147,7 +147,7 @@ jobs:
           find squashfs-root | head -300
 
       #
-      # Cleanup dangerous files
+      # Cleanup unsafe files
       #
       - name: Cleanup unsafe files
         run: |
@@ -193,7 +193,12 @@ jobs:
 
           cd firmware
 
-          tar -cvf \
+          tar \
+            --format=gnu \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -cvf \
             ../output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin \
             CONTROL \
             kernel \
@@ -216,6 +221,12 @@ jobs:
           echo
 
           sha256sum output/*
+
+          echo
+
+          echo "===== TAR CONTENT ====="
+
+          tar -tvf output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
 
       #
       # Upload artifact
