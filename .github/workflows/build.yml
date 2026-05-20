@@ -1,4 +1,4 @@
-name: Build M520 Sysupgrade
+name: Build RG-MTFi-M520 Sysupgrade
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       #
-      # Install packages
+      # Install required packages
       #
       - name: Install packages
         run: |
@@ -25,105 +25,187 @@ jobs:
           sudo apt install -y \
             wget \
             rsync \
-            squashfs-tools \
-            xz-utils \
-            tar
+            tar \
+            file \
+            squashfs-tools
 
       #
-      # Download latest kernel
+      # Prepare directories
       #
-      - name: Download kernel
+      - name: Prepare directories
         run: |
-
           mkdir -p firmware
+          mkdir -p output
 
-          wget -O firmware/kernel.bin \
+      #
+      # Download official X-WRT kernel
+      #
+      - name: Download X-WRT kernel
+        run: |
+          wget -O firmware/kernel \
             https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p2-kernel.bin
 
       #
-      # Prepare rootfs
+      # Download official X-WRT rootfs
       #
-      - name: Prepare rootfs
+      - name: Download X-WRT rootfs
+        run: |
+          wget -O firmware/rootfs.bin \
+            https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-mmcblk0p3-rootfs.bin
+
+      #
+      # Extract original rootfs
+      #
+      - name: Extract rootfs
         run: |
 
-          mkdir -p build-rootfs
-
-          rsync -a \
-            --exclude dev \
-            --exclude proc \
-            --exclude sys \
-            --exclude tmp \
-            --exclude overlay \
-            --exclude rom \
-            rootfs/ \
-            build-rootfs/
+          #
+          # Ignore device node errors in GitHub Actions
+          #
+          unsquashfs -f -d squashfs-root firmware/rootfs.bin || true
 
           #
-          # Required dirs
+          # Fake console device for CI
           #
-          mkdir -p build-rootfs/dev
-          mkdir -p build-rootfs/proc
-          mkdir -p build-rootfs/sys
-          mkdir -p build-rootfs/tmp
+          mkdir -p squashfs-root/dev
 
-          #
-          # Fake console
-          #
-          touch build-rootfs/dev/console
+          touch squashfs-root/dev/console
 
-          #
-          # Remove dangerous kernel modules
-          #
-          find build-rootfs -name "*.ko" -delete || true
+          echo "===== ORIGINAL ROOTFS ====="
+
+          find squashfs-root | head -200
 
       #
-      # Build rootfs.bin
+      # Inject SAFE custom overlay
       #
-      - name: Build rootfs
+      - name: Inject custom files
+        run: |
+
+          #
+          # SAFE ETC
+          #
+          if [ -d rootfs/etc/config ]; then
+            rsync -a rootfs/etc/config/ squashfs-root/etc/config/
+          fi
+
+          if [ -d rootfs/etc/init.d ]; then
+            rsync -a rootfs/etc/init.d/ squashfs-root/etc/init.d/
+          fi
+
+          if [ -d rootfs/etc/uci-defaults ]; then
+            rsync -a rootfs/etc/uci-defaults/ squashfs-root/etc/uci-defaults/
+          fi
+
+          if [ -d rootfs/etc/nginx ]; then
+            rsync -a rootfs/etc/nginx/ squashfs-root/etc/nginx/
+          fi
+
+          if [ -d rootfs/etc/profile.d ]; then
+            rsync -a rootfs/etc/profile.d/ squashfs-root/etc/profile.d/
+          fi
+
+          if [ -d rootfs/etc/sysctl.d ]; then
+            rsync -a rootfs/etc/sysctl.d/ squashfs-root/etc/sysctl.d/
+          fi
+
+          if [ -d rootfs/etc/nftables.d ]; then
+            rsync -a rootfs/etc/nftables.d/ squashfs-root/etc/nftables.d/
+          fi
+
+          if [ -d rootfs/etc/rc.button ]; then
+            rsync -a rootfs/etc/rc.button/ squashfs-root/etc/rc.button/
+          fi
+
+          #
+          # SAFE USR
+          #
+          if [ -d rootfs/usr/bin ]; then
+            rsync -a rootfs/usr/bin/ squashfs-root/usr/bin/
+          fi
+
+          if [ -d rootfs/usr/sbin ]; then
+            rsync -a rootfs/usr/sbin/ squashfs-root/usr/sbin/
+          fi
+
+          if [ -d rootfs/usr/lib/lua ]; then
+            rsync -a rootfs/usr/lib/lua/ squashfs-root/usr/lib/lua/
+          fi
+
+          if [ -d rootfs/usr/share ]; then
+            rsync -a rootfs/usr/share/ squashfs-root/usr/share/
+          fi
+
+          #
+          # SAFE WWW
+          #
+          if [ -d rootfs/www ]; then
+            rsync -a rootfs/www/ squashfs-root/www/
+          fi
+
+          echo "===== MERGED ROOTFS ====="
+
+          find squashfs-root | head -300
+
+      #
+      # Cleanup unsafe files
+      #
+      - name: Cleanup unsafe files
+        run: |
+
+          rm -rf squashfs-root/lib/modules || true
+          rm -rf squashfs-root/lib/apk || true
+          rm -rf squashfs-root/etc/apk || true
+          rm -rf squashfs-root/usr/lib/opkg || true
+
+      #
+      # Rebuild squashfs root
+      #
+      - name: Build new root
         run: |
 
           mksquashfs \
-            build-rootfs \
-            firmware/rootfs.bin \
+            squashfs-root \
+            firmware/root \
             -noappend \
             -comp xz \
-            -b 262144
+            -b 262144 \
+            -no-xattrs \
+            -all-root
 
       #
-      # Create sysupgrade.bin
+      # Create CONTROL
       #
-      - name: Create sysupgrade
+      - name: Create CONTROL
         run: |
 
-          mkdir -p output/sysupgrade
+          echo "BOARD=ruijie,rg-mtfi-m520" > firmware/CONTROL
+          echo "VERSION=26.04-custom" >> firmware/CONTROL
 
-          #
-          # Required filenames
-          #
-          cp firmware/kernel.bin \
-            output/sysupgrade/kernel
+          echo "===== CONTROL ====="
 
-          cp firmware/rootfs.bin \
-            output/sysupgrade/root
+          cat firmware/CONTROL
 
-          #
-          # CONTROL
-          #
-          cat > output/sysupgrade/CONTROL << 'EOF'
-          BOARD=ruijie,rg-mtfi-m520
-          VERSION=Custom
-          EOF
+      #
+      # Build sysupgrade.bin
+      #
+      - name: Build sysupgrade
+        run: |
 
-          #
-          # Create final sysupgrade.bin
-          #
-          cd output/sysupgrade
+          cd firmware
 
-          tar -cvf \
-            ../openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin \
-            CONTROL \
+          tar \
+            --format=gnu \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --transform='s#^kernel$#/kernel#' \
+            --transform='s#^root$#/root#' \
+            --transform='s#^CONTROL$#/CONTROL#' \
+            -cvf \
+            ../output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin \
             kernel \
-            root
+            root \
+            CONTROL
 
       #
       # Verify firmware
@@ -131,22 +213,30 @@ jobs:
       - name: Verify firmware
         run: |
 
+          echo "===== OUTPUT ====="
+
           ls -lah output
 
           echo
 
-          file output/*.bin
+          file output/*
 
           echo
 
-          sha256sum output/*.bin
+          sha256sum output/*
+
+          echo
+          echo "===== TAR CONTENT ====="
+
+          tar -tvf \
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
 
       #
-      # Upload sysupgrade.bin
+      # Upload firmware
       #
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: m520-sysupgrade
+          name: rg-mtfi-m520-sysupgrade
           path: |
-            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-sysupgrade.bin
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
