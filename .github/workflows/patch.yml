@@ -1,0 +1,228 @@
+name: Patch X-WRT Sysupgrade
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      #
+      # Checkout repo
+      #
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      #
+      # Install tools
+      #
+      - name: Install packages
+        run: |
+          sudo apt update
+
+          sudo apt install -y \
+            wget \
+            rsync \
+            tar \
+            file \
+            squashfs-tools \
+            xz-utils \
+            binwalk
+
+      #
+      # Prepare dirs
+      #
+      - name: Prepare dirs
+        run: |
+          mkdir -p work
+          mkdir -p output
+
+      #
+      # Download ORIGINAL sysupgrade
+      #
+      - name: Download original firmware
+        run: |
+
+          wget -O work/original.bin \
+            https://downloads.x-wrt.com/rom/x-wrt-26.04-b202605170835-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
+
+      #
+      # Inspect original firmware
+      #
+      - name: Inspect firmware
+        run: |
+
+          echo "===== FILE ====="
+
+          file work/original.bin
+
+          echo
+          echo "===== TAR TEST ====="
+
+          tar -tvf work/original.bin || true
+
+      #
+      # Extract original sysupgrade
+      #
+      - name: Extract original sysupgrade
+        run: |
+
+          mkdir -p work/fw
+
+          cd work/fw
+
+          tar -xvf ../original.bin
+
+          echo
+          echo "===== ORIGINAL CONTENT ====="
+
+          find . | head -100
+
+      #
+      # Extract original rootfs
+      #
+      - name: Extract original rootfs
+        run: |
+
+          unsquashfs \
+            -f \
+            -d work/rootfs \
+            work/fw/root || true
+
+          mkdir -p work/rootfs/dev
+
+          touch work/rootfs/dev/console
+
+          echo
+          echo "===== ROOTFS ====="
+
+          find work/rootfs | head -200
+
+      #
+      # Overlay SAFE custom files
+      #
+      - name: Inject custom overlay
+        run: |
+
+          #
+          # ETC
+          #
+          if [ -d rootfs/etc/config ]; then
+            rsync -a rootfs/etc/config/ work/rootfs/etc/config/
+          fi
+
+          if [ -d rootfs/etc/init.d ]; then
+            rsync -a rootfs/etc/init.d/ work/rootfs/etc/init.d/
+          fi
+
+          if [ -d rootfs/etc/uci-defaults ]; then
+            rsync -a rootfs/etc/uci-defaults/ work/rootfs/etc/uci-defaults/
+          fi
+
+          if [ -d rootfs/etc/nginx ]; then
+            rsync -a rootfs/etc/nginx/ work/rootfs/etc/nginx/
+          fi
+
+          if [ -d rootfs/etc/profile.d ]; then
+            rsync -a rootfs/etc/profile.d/ work/rootfs/etc/profile.d/
+          fi
+
+          #
+          # USR
+          #
+          if [ -d rootfs/usr/bin ]; then
+            rsync -a rootfs/usr/bin/ work/rootfs/usr/bin/
+          fi
+
+          if [ -d rootfs/usr/sbin ]; then
+            rsync -a rootfs/usr/sbin/ work/rootfs/usr/sbin/
+          fi
+
+          if [ -d rootfs/usr/lib/lua ]; then
+            rsync -a rootfs/usr/lib/lua/ work/rootfs/usr/lib/lua/
+          fi
+
+          if [ -d rootfs/usr/share ]; then
+            rsync -a rootfs/usr/share/ work/rootfs/usr/share/
+          fi
+
+          #
+          # WWW
+          #
+          if [ -d rootfs/www ]; then
+            rsync -a rootfs/www/ work/rootfs/www/
+          fi
+
+      #
+      # Cleanup dangerous files
+      #
+      - name: Cleanup unsafe files
+        run: |
+
+          rm -rf work/rootfs/lib/modules || true
+          rm -rf work/rootfs/lib/apk || true
+          rm -rf work/rootfs/etc/apk || true
+          rm -rf work/rootfs/usr/lib/opkg || true
+
+      #
+      # Rebuild rootfs
+      #
+      - name: Rebuild rootfs
+        run: |
+
+          rm -f work/fw/root
+
+          mksquashfs \
+            work/rootfs \
+            work/fw/root \
+            -noappend \
+            -comp xz \
+            -b 262144 \
+            -no-xattrs \
+            -all-root
+
+      #
+      # Repack ORIGINAL sysupgrade structure
+      #
+      - name: Repack firmware
+        run: |
+
+          cd work/fw
+
+          tar -cvf \
+            ../../output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin \
+            *
+
+      #
+      # Verify final firmware
+      #
+      - name: Verify firmware
+        run: |
+
+          echo "===== OUTPUT ====="
+
+          ls -lah output
+
+          echo
+          file output/*
+
+          echo
+          sha256sum output/*
+
+          echo
+          echo "===== TAR CONTENT ====="
+
+          tar -tvf \
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
+
+      #
+      # Upload artifact
+      #
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: rg-mtfi-m520-sysupgrade
+          path: |
+            output/openwrt-ipq806x-generic-ruijie_rg-mtfi-m520-squashfs-sysupgrade.bin
