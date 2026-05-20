@@ -1,0 +1,114 @@
+name: Build X-WRT-like M520
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      #
+      # Checkout
+      #
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      #
+      # Install tools
+      #
+      - name: Install tools
+        run: |
+          sudo apt update
+
+          sudo apt install -y \
+            wget \
+            tar \
+            zstd \
+            rsync \
+            file
+
+      #
+      # Download ImageBuilder
+      #
+      - name: Download ImageBuilder
+        run: |
+
+          wget -O ib.tar.zst \
+            https://downloads.openwrt.org/snapshots/targets/ipq806x/generic/openwrt-imagebuilder-ipq806x-generic.Linux-x86_64.tar.zst
+
+          mkdir imagebuilder
+
+          tar --zstd -xf ib.tar.zst -C imagebuilder --strip-components=1
+
+      #
+      # Show profiles
+      #
+      - name: Show profiles
+        run: |
+          cd imagebuilder
+          make info
+
+      #
+      # Inject custom rootfs
+      #
+      - name: Inject custom rootfs
+        run: |
+
+          mkdir -p imagebuilder/files
+
+          rsync -a \
+            rootfs/ \
+            imagebuilder/files/
+
+          echo "===== CUSTOM ROOTFS ====="
+
+          find imagebuilder/files | head -300
+
+      #
+      # Build firmware
+      #
+      - name: Build firmware
+        run: |
+
+          cd imagebuilder
+
+          make image \
+            PROFILE="ruijie_rg-mtfi-m520" \
+            FILES="files"
+
+      #
+      # Collect firmware
+      #
+      - name: Collect firmware
+        run: |
+
+          mkdir -p output
+
+          cp imagebuilder/bin/targets/ipq806x/generic/*sysupgrade.bin output/ || true
+
+          cp imagebuilder/bin/targets/ipq806x/generic/*factory.bin output/ || true
+
+          ls -lah output
+
+      #
+      # Verify
+      #
+      - name: Verify
+        run: |
+
+          file output/*
+
+          echo
+
+          sha256sum output/*
+
+      #
+      # Upload
+      #
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: xwrt-m520-custom-rootfs
+          path: output/*
