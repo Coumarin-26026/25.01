@@ -177,13 +177,15 @@ jobs:
 
           ls -lah output
 
-          echo
+           echo
+           echo "===== FILE TYPES ====="
 
-          file output/*
+           find output -maxdepth 1 -type f -exec file {} \;
 
-          echo
+           echo
+           echo "===== SHA256 ====="
 
-          sha256sum output/*
+           find output -maxdepth 1 -type f -exec sha256sum {} \;
 
       #
       # Upload firmware
