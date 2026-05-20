@@ -1,0 +1,78 @@
+name: Build Custom RootFS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            squashfs-tools \
+            rsync \
+            file
+
+      #
+      # Prepare rootfs
+      #
+      - name: Prepare rootfs
+        run: |
+
+          mkdir -p build-rootfs
+
+          rsync -a rootfs/ build-rootfs/
+
+          #
+          # Runtime dirs
+          #
+          mkdir -p build-rootfs/tmp
+          mkdir -p build-rootfs/overlay
+
+          echo "===== ROOTFS ====="
+          find build-rootfs | head -200
+
+      #
+      # Build squashfs rootfs.bin
+      #
+      - name: Build rootfs.bin
+        run: |
+
+          mkdir -p output
+
+          mksquashfs \
+            build-rootfs \
+            output/rootfs.bin \
+            -noappend \
+            -comp xz \
+            -b 262144 \
+            -no-xattrs \
+            -all-root
+
+      #
+      # Verify
+      #
+      - name: Verify
+        run: |
+
+          ls -lah output
+
+          file output/rootfs.bin
+
+          sha256sum output/rootfs.bin
+
+      #
+      # Upload
+      #
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: m520-rootfs
+          path: output/rootfs.bin
