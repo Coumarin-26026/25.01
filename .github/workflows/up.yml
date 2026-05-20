@@ -30,7 +30,7 @@ jobs:
             squashfs-tools
 
       #
-      # Create working directories
+      # Prepare directories
       #
       - name: Prepare directories
         run: |
@@ -58,7 +58,18 @@ jobs:
       #
       - name: Extract rootfs
         run: |
-          unsquashfs -d squashfs-root firmware/rootfs.bin
+
+          #
+          # Ignore device node errors in GitHub Actions
+          #
+          unsquashfs -f -d squashfs-root firmware/rootfs.bin || true
+
+          #
+          # Fake console device for CI
+          #
+          mkdir -p squashfs-root/dev
+
+          touch squashfs-root/dev/console
 
           echo "===== ORIGINAL ROOTFS ====="
 
@@ -136,10 +147,22 @@ jobs:
           find squashfs-root | head -300
 
       #
+      # Cleanup dangerous files
+      #
+      - name: Cleanup unsafe files
+        run: |
+
+          rm -rf squashfs-root/lib/modules || true
+          rm -rf squashfs-root/lib/apk || true
+          rm -rf squashfs-root/etc/apk || true
+          rm -rf squashfs-root/usr/lib/opkg || true
+
+      #
       # Rebuild squashfs root
       #
       - name: Build new root
         run: |
+
           mksquashfs \
             squashfs-root \
             firmware/root \
@@ -154,6 +177,7 @@ jobs:
       #
       - name: Create CONTROL
         run: |
+
           echo "BOARD=ruijie,rg-mtfi-m520" > firmware/CONTROL
           echo "VERSION=26.04-custom" >> firmware/CONTROL
 
@@ -166,6 +190,7 @@ jobs:
       #
       - name: Build sysupgrade
         run: |
+
           cd firmware
 
           tar -cvf \
@@ -179,6 +204,7 @@ jobs:
       #
       - name: Verify firmware
         run: |
+
           echo "===== OUTPUT ====="
 
           ls -lah output
